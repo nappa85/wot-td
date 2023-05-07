@@ -209,7 +209,7 @@ mod human_readable_info;
 use std::{collections::HashMap, fmt, marker::PhantomData, ops::Not};
 
 use oxilangtag::LanguageTag;
-use serde_json::Value;
+use serde_json::json;
 use time::OffsetDateTime;
 
 use crate::{
@@ -217,8 +217,8 @@ use crate::{
     thing::{
         AdditionalExpectedResponse, ComboSecurityScheme, DataSchemaFromOther,
         DefaultedFormOperations, ExpectedResponse, Form, FormOperation, KnownSecuritySchemeSubtype,
-        Link, SecurityScheme, SecuritySchemeSubtype, Thing, UnknownSecuritySchemeSubtype,
-        VersionInfo, TD_CONTEXT_11,
+        Link, SecurityScheme, SecuritySchemeSubtype, TdContext, Thing,
+        UnknownSecuritySchemeSubtype, VersionInfo,
     },
 };
 
@@ -258,7 +258,7 @@ pub use self::typetags::*;
 /// [`Thing`].
 #[must_use]
 pub struct ThingBuilder<Other: ExtendableThing, Status> {
-    context: Vec<Context>,
+    context: Vec<TdContext>,
     id: Option<String>,
     attype: Option<Vec<String>>,
     title: String,
@@ -439,7 +439,7 @@ impl<Other: ExtendableThing> ThingBuilder<Other, ToExtend> {
         Other: Default,
     {
         let title = title.into();
-        let context = vec![Context::Simple(TD_CONTEXT_11.to_string())];
+        let context = vec![TdContext::V1_1];
 
         Self {
             context,
@@ -476,7 +476,7 @@ impl<Other: ExtendableThing> ThingBuilder<Other, ToExtend> {
         Other::Empty: ExtendableThing,
     {
         let title = title.into();
-        let context = vec![Context::Simple(TD_CONTEXT_11.to_string())];
+        let context = vec![TdContext::V1_1];
 
         ThingBuilder {
             context,
@@ -848,22 +848,10 @@ impl<Other: ExtendableThing, Status> ThingBuilder<Other, Status> {
             .not()
             .then_some(schema_definitions);
 
-        let context = {
-            // TODO: improve this
-            if context.len() == 1 {
-                Value::String(context.into_iter().next().unwrap().into_simple().unwrap())
-            } else {
-                context
-                    .into_iter()
-                    .map(|context| match context {
-                        Context::Simple(s) => Value::from(s),
-                        Context::Map(map) => {
-                            let map = map.into_iter().map(|(k, v)| (k, Value::from(v))).collect();
-                            Value::Object(map)
-                        }
-                    })
-                    .collect()
-            }
+        let context = if context.len() == 1 {
+            context.into_iter().next().unwrap()
+        } else {
+            TdContext::Other(json!(context))
         };
 
         let invalid_uri_variables = uri_variables
@@ -1076,13 +1064,13 @@ impl<Other: ExtendableThing, Status> ThingBuilder<Other, Status> {
     /// Add a new JSON-LD @context in the default namespace
     pub fn context<S>(mut self, value: S) -> Self
     where
-        S: Into<String> + AsRef<str>,
+        S: AsRef<str>,
     {
-        if value.as_ref() == TD_CONTEXT_11 {
+        if value.as_ref() == TdContext::V1_1 {
             return self;
         }
 
-        let context = Context::Simple(value.into());
+        let context = TdContext::from(value.as_ref());
         self.context.push(context);
         self
     }
@@ -1126,7 +1114,7 @@ impl<Other: ExtendableThing, Status> ThingBuilder<Other, Status> {
         let mut context_map = ContextMapBuilder(Default::default());
         f(&mut context_map);
 
-        self.context.push(Context::Map(context_map.0));
+        self.context.push(TdContext::Other(json!(context_map.0)));
         self
     }
 
@@ -1735,20 +1723,6 @@ where
                 })
         })
         .transpose()
-}
-
-enum Context {
-    Simple(String),
-    Map(HashMap<String, String>),
-}
-
-impl Context {
-    fn into_simple(self) -> Option<String> {
-        match self {
-            Self::Simple(s) => Some(s),
-            _ => None,
-        }
-    }
 }
 
 /// Builder to create a structured JSON-LD @context with multiple namespaces

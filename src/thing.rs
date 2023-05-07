@@ -16,7 +16,7 @@ use std::{
 
 use oxilangtag::LanguageTag;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
+use serde_json::{json, Value};
 use serde_with::{serde_as, skip_serializing_none, DeserializeAs, OneOrMany, Same};
 use time::OffsetDateTime;
 
@@ -44,6 +44,69 @@ pub const TD_CONTEXT_10: &str = "https://www.w3.org/2019/wot/td/v1";
 /// description](https://www.w3.org/TR/wot-thing-description11/)
 pub const TD_CONTEXT_11: &str = "https://www.w3.org/2022/wot/td/v1.1";
 
+#[derive(Debug, Default, PartialEq)]
+pub enum TdContext {
+    /// See `TD_CONTEXT_10`
+    V1_0,
+    /// See `TD_CONTEXT_11`
+    #[default]
+    V1_1,
+    /// Any other value
+    Other(Value),
+}
+
+impl<'a> PartialEq<TdContext> for &'a str {
+    fn eq(&self, other: &TdContext) -> bool {
+        match (other, *self) {
+            (TdContext::V1_0, TD_CONTEXT_10) => true,
+            (TdContext::V1_1, TD_CONTEXT_11) => true,
+            (TdContext::Other(v), s) if v == s => true,
+            _ => false,
+        }
+    }
+}
+
+impl<'a> From<&'a str> for TdContext {
+    fn from(value: &'a str) -> Self {
+        if value == TD_CONTEXT_10 {
+            TdContext::V1_0
+        } else if value == TD_CONTEXT_11 {
+            TdContext::V1_1
+        } else {
+            TdContext::Other(json!(value))
+        }
+    }
+}
+
+impl Serialize for TdContext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            TdContext::V1_0 => serializer.serialize_str(TD_CONTEXT_10),
+            TdContext::V1_1 => serializer.serialize_str(TD_CONTEXT_11),
+            TdContext::Other(v) => v.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TdContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let temp = Value::deserialize(deserializer)?;
+        if temp == TD_CONTEXT_10 {
+            Ok(TdContext::V1_0)
+        } else if temp == TD_CONTEXT_11 {
+            Ok(TdContext::V1_1)
+        } else {
+            Ok(TdContext::Other(temp))
+        }
+    }
+}
+
 /// An abstraction of a physical or a virtual entity
 ///
 /// It contains metadata and a description of its interfaces.
@@ -56,8 +119,8 @@ pub struct Thing<Other: ExtendableThing = Nil> {
     // https://www.w3.org/TR/json-ld11/#the-context
     // Let's take a value for now and assume we'll use the json-ld crate later
     /// A [JSON-LD @context](https://www.w3.org/TR/json-ld11/#the-context)
-    #[serde(rename = "@context", default = "default_context")]
-    pub context: Value,
+    #[serde(rename = "@context")]
+    pub context: TdContext,
 
     /// A unique identifier
     pub id: Option<String>,
@@ -270,10 +333,6 @@ where
             && self.schema_definitions == other.schema_definitions
             && self.other == other.other
     }
-}
-
-fn default_context() -> Value {
-    TD_CONTEXT_11.into()
 }
 
 impl Thing<Nil> {
@@ -1742,7 +1801,7 @@ mod test {
         }"#;
 
         let expected_thing = Thing {
-            context: TD_CONTEXT_11.into(),
+            context: TdContext::V1_1,
             id: Some("urn:dev:ops:32473-WoTLamp-1234".to_string()),
             title: "MyLampThing".to_string(),
             security_definitions: [("nosec".to_string(), SecurityScheme::default())]
@@ -1859,7 +1918,7 @@ mod test {
         }"#;
 
         let expected_thing = Thing {
-            context: TD_CONTEXT_11.into(),
+            context: TdContext::V1_1,
             id: Some("urn:dev:ops:32473-WoTLamp-1234".to_string()),
             attype: Some(vec!["Thing".to_string(), "LampThing".to_string()]),
             title: "MyLampThing".to_string(),
@@ -2026,7 +2085,7 @@ mod test {
         }"#;
 
         let expected_thing = Thing {
-            context: TD_CONTEXT_11.into(),
+            context: TdContext::V1_1,
             title: "MyLampThing".to_string(),
             security_definitions: [("nosec".to_string(), SecurityScheme::default())]
                 .into_iter()
@@ -2113,7 +2172,7 @@ mod test {
     #[test]
     fn extend_single_thing() {
         let thing = Thing::<ThingExtA> {
-            context: "test".into(),
+            context: TdContext::Other("test".into()),
             properties: Some(
                 [(
                     "prop".to_string(),
@@ -2268,7 +2327,7 @@ mod test {
     #[test]
     fn extend_single_thing_with_hlist() {
         let thing = Thing::<Cons<ThingExtA, Nil>> {
-            context: "test".into(),
+            context: TdContext::Other("test".into()),
             properties: Some(
                 [(
                     "prop".to_string(),
@@ -2465,7 +2524,7 @@ mod test {
     #[test]
     fn extend_thing_with_two() {
         let thing = Thing::<Cons<ThingExtB, Cons<ThingExtA, Nil>>> {
-            context: "test".into(),
+            context: TdContext::Other("test".into()),
             properties: Some(
                 [(
                     "prop".to_string(),
@@ -2666,7 +2725,7 @@ mod test {
         }
 
         let thing = Thing::<Cons<ThingExtB, Cons<HttpThing, Cons<ThingExtA, Nil>>>> {
-            context: "test".into(),
+            context: TdContext::Other("test".into()),
             properties: Some(
                 [(
                     "prop".to_string(),
